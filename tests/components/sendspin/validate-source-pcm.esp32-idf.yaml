@@ -1,0 +1,21 @@
+# PCM with the defaults, a mono microphone at a rate Opus does not accept
+substitutions:
+  i2s_din_pin: GPIO39
+
+packages:
+  i2s_audio: !include ../../test_build_components/common/i2s_audio/esp32-idf.yaml
+  sendspin: !include common.yaml
+
+microphone:
+  - platform: i2s_audio
+    id: sendspin_mic_id
+    i2s_audio_id: i2s_audio_bus
+    i2s_din_pin: ${i2s_din_pin}
+    adc_type: external
+    sample_rate: 44100
+
+sendspin:
+  source:
+    microphone:
+      microphone: sendspin_mic_id
+      bits_per_sample: 24

@@ -158,6 +158,16 @@ void SendspinHub::setup() {
   this->client_->add_player(this->player_config_).set_listener(this->player_listener_);
 #endif
 
+#ifdef USE_SENDSPIN_SOURCE
+  this->source_role_ = &this->client_->add_source(this->source_config_);
+  this->source_role_->set_listener(this);
+  // THREAD CONTEXT: Microphone task, the role's single producer. A capture time of 0 (unknown) makes the library
+  // stamp the buffer as ending now.
+  this->microphone_source_->add_data_callback([this](const std::vector<uint8_t> &data, int64_t capture_time_us) {
+    this->source_role_->write_audio(data.data(), data.size(), capture_time_us);
+  });
+#endif
+
   // Set before setup() by codegen; an unpaired access switch sets it later, from its own setup().
   if (this->unpaired_access_.has_value()) {
     this->client_->set_unpaired_access_enabled(*this->unpaired_access_);
@@ -222,6 +232,23 @@ void SendspinHub::dump_config() {
                   IMAGE_FORMAT_NAMES[static_cast<uint8_t>(preference.format)], preference.width, preference.height,
                   preference.display_offset_ms);
   }
+#endif
+
+#ifdef USE_SENDSPIN_SOURCE
+  ESP_LOGCONFIG(TAG,
+                "  Source:\n"
+                "    Codec: %s\n"
+                "    Sample rate: %" PRIu32 " Hz\n"
+                "    Channels: %u\n"
+                "    Bits per sample: %u\n"
+                "    Chunk duration: %" PRIu32 " ms\n"
+                "    Buffer duration: %" PRIu32 " ms\n"
+                "    Line sense: %s",
+                this->source_config_.codec == sendspin::SendspinCodecFormat::OPUS ? LOG_STR_LITERAL("Opus")
+                                                                                  : LOG_STR_LITERAL("PCM"),
+                this->source_config_.sample_rate, this->source_config_.channels, this->source_config_.bit_depth,
+                this->source_config_.chunk_duration_ms, this->source_config_.capture_buffer_ms,
+                YESNO(this->source_config_.line_sense));
 #endif
 }
 
@@ -561,6 +588,27 @@ sendspin::PlayerRole *SendspinHub::get_player_role() {
     return this->client_->player();
   }
   return nullptr;
+}
+#endif
+
+#ifdef USE_SENDSPIN_SOURCE
+// THREAD CONTEXT: Main loop (invoked from the sendspin.source.set_signal action)
+void SendspinHub::set_source_signal(bool present) {
+  if (this->source_role_ != nullptr) {
+    this->source_role_->set_signal(present ? sendspin::SourceSignal::PRESENT : sendspin::SourceSignal::ABSENT);
+  }
+}
+
+// THREAD CONTEXT: Main loop (SourceRoleListener override, fired from client_->loop())
+void SendspinHub::on_streaming_started() {
+  this->microphone_source_->start();
+  this->source_streaming_started_callbacks_.call();
+}
+
+// THREAD CONTEXT: Main loop (SourceRoleListener override, fired from client_->loop())
+void SendspinHub::on_streaming_stopped() {
+  this->microphone_source_->stop();
+  this->source_streaming_stopped_callbacks_.call();
 }
 #endif
 
